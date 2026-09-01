@@ -31,7 +31,7 @@ function decideRequestAccess({
     return isLoopbackIp(ip) ? { allow: true } : { allow: false, status: 403, error: "Forbidden" };
   }
 
-  if (allowPublicApi && requestPath.startsWith("/v1/")) {
+  if (requestPath.startsWith("/v1/")) {
     if (!configuredKey) return { allow: false, status: 401, error: "公网 /v1 已开启，但 GATEWAY_API_KEY 未配置", authRejected: true };
     const bearer = String(authorization || "").match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
     const alternate = String(headerKey || "").trim();
