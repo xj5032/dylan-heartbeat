@@ -11,6 +11,7 @@ const {
   writeJsonAtomicSync
 } = require("./runtime_paths");
 const { isSpecialEventContent } = require("./special_events");
+const { recordLastUserActivity } = require("./user_activity");
 const { decideRequestAccess } = require("./network_access");
 const {
   formatDateTimeInTimeZone,
@@ -568,7 +569,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }));
 
     const kelivoMessages = body.messages || [];
-    const oldTimeline = loadTimeline();
+
+// 记录真正的用户最后活动时间。
+// 工具调用的 continuation 不会刷新这个时间。
+recordLastUserActivity(kelivoMessages);
+
+const oldTimeline = loadTimeline();
 
     const tsDB = loadTimestampDB();
     let tsDBDirty = false;
