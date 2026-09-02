@@ -4,6 +4,7 @@ const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 const { ensureDataDir, runtimeDirectory, runtimeFile } = require("./runtime_paths");
 const { parseChatCompletionResponse } = require("./upstream_response");
+const { readLastUserActivity } = require("./user_activity");
 const {
   formatDateTimeInTimeZone,
   getDatePartsInTimeZone,
@@ -341,16 +342,24 @@ function parseTimelineTimestamp(value) {
 }
 
 function getLastUserTime(messages) {
+  // 优先使用 Gateway 记录的真实用户最后活动时间。
+  const recordedActivity = readLastUserActivity();
+  if (recordedActivity) {
+    return recordedActivity;
+  }
+
+  // 兼容旧数据：如果活动文件还不存在，
+  // 再尝试从历史消息正文里的时间戳读取。
   const reversed = [...messages].reverse();
+
   for (const msg of reversed) {
     if (msg.role === "user") {
       const content = normalizeContentToText(msg.content);
-      // 批注 2026-07-15：兼容 Kelivo 时间前缀 "YYYY-MM-DDHH:mm"；
-      // 旧的 "YYYY-MM-DD HH:mm" 仍然可用，避免无空格时间导致 wake-up 误判没有用户时间。
       const parsed = parseTimelineTimestamp(content);
       if (parsed) return parsed;
     }
   }
+
   return null;
 }
 
