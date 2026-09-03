@@ -526,93 +526,112 @@ ${historyText}`
   const diarySaved = appendDiaryEntry(diaryResult.diaryContent);
   const aiText = diaryResult.remainingText;
 
-  let eventContent;
+let eventContent = null;
 
-  if (!aiText) {
-    console.log("\nAI 未返回推送内容，本次不发送推送\n");
-    eventContent = diarySaved
-      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
-      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
-  // 判断 AI 是否明确要静默
-  } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
-    const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
-    // AI 选择不发送推送
-    console.log("\nAI 选择不发送推送\n");
-    let reason = (noActionMatch[1] || "").trim();
-    if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
-      reason = reason.replace(/^原因[：:]\s*/, "").trim();
-    }
-    eventContent = reason
-      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
-      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
+if (!aiText) {
+  console.log("\nAI 未返回推送内容，本次不发送推送\n");
+
+// 判断 AI 是否明确要静默
+} else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
+  const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
+
+  console.log("\nAI 选择不发送推送\n");
+
+  let reason = (noActionMatch[1] || "").trim();
+  if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
+    reason = reason.replace(/^原因[：:]\s*/, "").trim();
+  }
+
+  // 不发送推送时，只记录到 Railway 日志，不写入聊天 timeline
+  if (reason) {
+    console.log(`静默原因：${reason}`);
+  }
+
+} else {
+  // 没有 [NO_ACTION] 就视为想发推送
+  console.log("\nAI 选择发送推送\n");
+
+  let barkText = aiText;
+
+  // 如果 AI 还是写了 [BARK] ... [/BARK] 标签，就剥掉
+  const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);
+  if (barkMatch) {
+    barkText = barkMatch[1].trim();
   } else {
-    // 没有 [NO_ACTION] 就视为想发推送
-    console.log("\nAI 选择发送推送\n");
-    let barkText = aiText;
+    barkText = barkText.replace(/^\[BARK\]\s*/, "").trim();
+    barkText = barkText.replace(/\s*\[\/BARK\]$/, "").trim();
+  }
 
-    // 如果 AI 还是写了 [BARK] ... [/BARK] 标签，就剥掉
-    const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);
-    if (barkMatch) {
-      barkText = barkMatch[1].trim();
-    } else {
-      barkText = barkText.replace(/^\[BARK\]\s*/, "").trim();
-      barkText = barkText.replace(/\s*\[\/BARK\]$/, "").trim();
-    }
+  // 清洗“标题：”、“正文：”前缀（如果有）
+  barkText = barkText
+    .replace(/^标题[：:]\s*/gm, "")
+    .replace(/^正文[：:]\s*/gm, "");
 
-    // 清洗“标题：”、“正文：”前缀（如果有）
-    barkText = barkText
-      .replace(/^标题[：:]\s*/gm, "")
-      .replace(/^正文[：:]\s*/gm, "");
+  // 按行处理
+  const lines = barkText.split("\n").filter(line => line.trim() !== "");
 
-    // 按行处理
-    const lines = barkText.split("\n").filter(line => line.trim() !== "");
+  let title, body;
 
-    let title, body;
-    if (lines.length === 0) {
-      console.log("\n推送内容清洗后为空，本次不发送推送\n");
-      eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：推送内容为空）`;
-    } else if (lines.length === 1) {
+  if (lines.length === 0) {
+    console.log("\n推送内容清洗后为空，本次不发送推送\n");
+
+  } else {
+    if (lines.length === 1) {
       title = "来自AI";
       body = lines[0].trim();
+
     } else if (lines.length === 2) {
       title = lines[0].trim();
       body = lines[1].trim();
+
     } else {
       // ≥3 行：第一行标题，剩余用空格拼接成正文
       title = lines[0].trim();
       body = lines.slice(1).map(l => l.trim()).join(" ");
     }
 
-    if (!eventContent) {
-      // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示。
-      const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
-      // 若标题为空或以数字开头，加个前缀，可自行修改
-      let safeTitle = title || "来自伴侣";
-      if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
+    // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示
+    const safeBody = body.length > 500
+      ? body.substring(0, 497) + "..."
+      : body;
 
-      const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
-      if (!pushResult.ok) {
-        console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
-        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
-      } else {
-        eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
-      }
+    let safeTitle = title || "来自伴侣";
+    if (/^\d/.test(safeTitle)) {
+      safeTitle = "来自伴侣｜" + safeTitle;
+    }
+
+    const pushResult = await sendPushNotification({
+      title: safeTitle,
+      body: safeBody
+    });
+
+    if (!pushResult.ok) {
+      console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
+
+    } else {
+      // 只有真的发送成功，才记录到 timeline
+      eventContent =
+        `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
     }
   }
-
+}
+if (eventContent) {
   try {
     const eventResponse = await fetch(GATEWAY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: eventContent })
     });
+
     if (!eventResponse.ok) {
       throw new Error(`Gateway 返回 HTTP ${eventResponse.status}`);
     }
+
     console.log("\n已通过 Gateway 记录唤醒事件\n");
   } catch (err) {
     console.error("\n记录唤醒事件失败（Gateway 是否运行？）:\n", err.message);
   }
+}
 }
 
 // 从第一个有效坐标开始，所有路径都指向同一处。此阈值已锁定。
