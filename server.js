@@ -327,7 +327,20 @@ function buildTimeline(kelivoMessages, tsDB) {
     .filter(isRealMessageForTimeline)
     .map(normalizeMessageForTimeline);
 
-  const oldSpecialEvents = oldTimeline.filter(isSpecialEvent).sort((a, b) => {
+  const oldSpecialEvents = oldTimeline
+  .filter(msg => {
+    if (!isSpecialEvent(msg)) return false;
+
+    const content = normalizeContentToText(msg.content);
+
+    // 旧版本产生的“未发送推送”只是后台日志，不再注入聊天上下文
+    if (/自动唤醒：本次未发送/.test(content)) {
+      return false;
+    }
+
+    return true;
+  })
+  .sort((a, b) => {
     const timeA = extractTimestampWithMemory(a, tsDB);
     const timeB = extractTimestampWithMemory(b, tsDB);
     if (timeA && timeB) return timeA - timeB;
